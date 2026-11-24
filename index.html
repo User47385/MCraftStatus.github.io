@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MCraft服务器状态页</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;min-height:100vh;padding:35px 15px;
+  background:#10131b;color:#fff;
+  font-family:Inter,"Microsoft YaHei",sans-serif;
+  display:flex;flex-direction:column;align-items:center;
+}
+.header{text-align:center;margin:15px 0 28px}
+.header h1{font-size:27px;margin:0 0 9px;letter-spacing:2px}
+.header p{color:#8993a8;font-size:13px}
+.container{width:100%;max-width:850px}
+.panel{
+  background:#191f2c;border:1px solid #30394c;
+  border-radius:18px;padding:20px;margin-bottom:15px;
+}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px}
+button{
+  border:0;border-radius:9px;padding:11px 17px;
+  color:white;background:#5369e8;cursor:pointer;
+  font-size:13px;font-weight:bold;
+}
+button:hover{filter:brightness(1.15)}
+button:disabled{opacity:.5;cursor:wait}
+#statusText{font-size:13px;color:#a5afc2}
+#canvasWrap{
+  width:100%;overflow:hidden;border-radius:14px;
+  background:#111722;
+}
+canvas{width:100%;height:auto;display:block}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:15px}
+.actions button{flex:1;min-width:120px}
+.footer{text-align:center;color:#667187;font-size:12px;margin-top:20px}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>MCraft服务器状态页</h1>
+  <p>提供服务器状态查询服务</p>
+</div>
+
+<div class="container">
+  <div class="panel">
+    <div class="toolbar">
+      <span id="statusText">正在连接服务器...</span>
+      <button onclick="refresh()">↻ 立即刷新</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div id="canvasWrap">
+      <canvas id="card"></canvas>
+    </div>
+    <div class="actions">
+      <button onclick="downloadPNG()">下载高清PNG图片</button>
+      <button onclick="copyIP()">复制服务器地址</button>
+    </div>
+  </div>
+
+  <div class="footer">
+    Website by ChatGPT<br><br>
+    数据来源：mcstatus.io · 每 60 秒自动更新
+  </div>
+</div>
+
+<script>
+const HOST = "mc.aach.top";
+const API = "https://api.mcstatus.io/v2/status/java/";
+const REFRESH_INTERVAL = 60000;
+
+const canvas = document.getElementById("card");
+const ctx = canvas.getContext("2d");
+
+let serverData = null;
+let lastUpdate = null;
+let refreshing = false;
+
+const W = 1200;
+const H = 760;
+const SCALE = 2;
+
+canvas.width = W * SCALE;
+canvas.height = H * SCALE;
+
+function rounded(x,y,w,h,r,color){
+  ctx.fillStyle=color;
+  ctx.beginPath();
+  ctx.roundRect(x,y,w,h,r);
+  ctx.fill();
+}
+
+function text(str,x,y,size,color="#fff",weight="normal"){
+  ctx.fillStyle=color;
+  ctx.font=`${weight} ${size}px "Microsoft YaHei",sans-serif`;
+  ctx.fillText(String(str),x,y);
+}
+
+function fitText(str,x,y,maxWidth,size,color="#fff"){
+  ctx.fillStyle=color;
+  ctx.font=`${size}px "Microsoft YaHei",sans-serif`;
+  let s=String(str||"未知");
+  while(ctx.measureText(s).width>maxWidth && s.length>3){
+    s=s.slice(0,-2)+"…";
+  }
+  ctx.fillText(s,x,y);
+}
+
+function line(x,y,w,color="#303b50"){
+  ctx.fillStyle=color;
+  ctx.fillRect(x,y,w,2);
+}
+
+function draw(data){
+  ctx.setTransform(SCALE,0,0,SCALE,0,0);
+
+  const online = !!data?.online;
+  const players = data?.players || {};
+  const version = data?.version?.name_clean || data?.version?.name || "未知";
+  const motd = data?.motd?.clean || data?.motd?.raw || "暂无服务器公告";
+  const ip = data?.ip || HOST;
+  const port = data?.port || 25565;
+  const count = players.online ?? 0;
+  const max = players.max ?? 0;
+  const software = data?.software || "未公开";
+  const playerList = players.list || [];
+
+  // Background
+  const gradient=ctx.createLinearGradient(0,0,W,H);
+  gradient.addColorStop(0,"#141d30");
+  gradient.addColorStop(1,"#111722");
+  ctx.fillStyle=gradient;
+  ctx.fillRect(0,0,W,H);
+
+  // Decorative circles
+  ctx.globalAlpha=.08;
+  ctx.fillStyle="#718bff";
+  ctx.beginPath();ctx.arc(1100,80,230,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(20,720,180,0,Math.PI*2);ctx.fill();
+  ctx.globalAlpha=1;
+
+  // Top
+  text("MCraft服务器",65,85,27,"#8da5ff","bold");
+  text("Server status",65,125,17,"#8290aa");
+
+  rounded(900,55,235,54,15,online?"#174b39":"#512a35");
+  text(online?"● ONLINE":"● OFFLINE",930,90,23,
+       online?"#56e6a0":"#ff7185","bold");
+
+  line(65,155,1070);
+
+  // Server name
+  text("服务器端口",65,215,17,"#8998b5");
+  fitText(HOST,65,275,1000,43,"#ffffff");
+
+  // Main statistics
+  const boxes=[
+    {x:65,label:"在线玩家",value:`${count} / ${max}`,color:"#62e5aa"},
+    {x:430,label:"游戏版本",value:version,color:"#86a5ff"},
+    {x:795,label:"服务器端口",value:port,color:"#f4c76d"}
+  ];
+
+  boxes.forEach(b=>{
+    rounded(b.x,315,340,130,16,"#202b40");
+    text(b.label,b.x+23,350,15,"#8493ad");
+    fitText(b.value,b.x+23,410,290,30,b.color);
+  });
+
+  // Server info
+  text("服务器信息",65,500,19,"#ffffff","bold");
+  line(65,520,1070);
+
+  text("服务器IP",65,565,14,"#8493ad");
+  fitText(ip,65,600,400,19,"#fff");
+
+  text("服务器软件",430,565,14,"#8493ad");
+  fitText(software,430,600,300,19,"#fff");
+
+  text("游戏版本",795,565,14,"#8493ad");
+  text("Java版",795,600,20,"#fff");
+
+  // MOTD
+  rounded(65,635,1070,75,12,"#202b40");
+  text("服务器MOTD",85,663,13,"#8493ad");
+  fitText(motd.replace(/\n/g," "),85,690,1020,17,"#e0e7f5");
+
+  // Footer
+  text("MCraft Online",65,742,12,"#63718a");
+  text(lastUpdate?"UPDATED "+lastUpdate:"WAITING FOR DATA",900,742,12,"#63718a");
+
+  // Player list stored in image metadata area if available
+  if(playerList.length){
+    // Actual player names are also displayed in page text below.
+  }
+}
+
+function drawLoading(message){
+  ctx.setTransform(SCALE,0,0,SCALE,0,0);
+  const g=ctx.createLinearGradient(0,0,W,H);
+  g.addColorStop(0,"#17233a");
+  g.addColorStop(1,"#111722");
+  ctx.fillStyle=g;
+  ctx.fillRect(0,0,W,H);
+  text("Mcraft服务器",65,100,30,"#8da5ff","bold");
+  text("服务器状态",65,145,18,"#8998b5");
+  text(message,65,300,28,"#ffffff");
+  text("正在连接至 "+HOST+" ...",65,350,18,"#8493ad");
+}
+
+function updateStatus(){
+  const online=!!serverData?.online;
+  const p=serverData?.players||{};
+  const players=p.list||[];
+
+  document.getElementById("statusText").innerText=
+    online ? `🟢 在线 · ${p.online??0}/${p.max??0} 人` : "🔴 服务器离线";
+}
+
+async function refresh(){
+  if(refreshing)return;
+  refreshing=true;
+  const status=document.getElementById("statusText");
+  status.textContent="正在获取最新服务器数据...";
+
+  try{
+    const response=await fetch(API+encodeURIComponent(HOST)+"?query=true",{
+      cache:"no-store"
+    });
+
+    if(!response.ok)throw new Error("API HTTP "+response.status);
+
+    const data=await response.json();
+    serverData=data;
+    lastUpdate=new Date().toLocaleString("zh-CN",{
+      hour12:false
+    });
+
+    draw(data);
+    updateStatus();
+
+    const players=data.players?.list||[];
+    const playerNames=players.map(p=>p.name_clean||p.name).join("、");
+
+    if(data.online && playerNames){
+      status.textContent=`🟢 在线 · ${data.players.online}/${data.players.max} 人 · 玩家：${playerNames}`;
+    }
+
+  }catch(error){
+    console.error(error);
+    status.textContent="⚠ 获取失败，请稍后重试";
+    drawLoading("无法获取服务器状态");
+  }finally{
+    refreshing=false;
+  }
+}
+
+function downloadPNG(){
+  if(!serverData){
+    alert("服务器数据尚未获取，请稍候");
+    return;
+  }
+
+  const a=document.createElement("a");
+  a.download="AACH-Server-Status.png";
+  a.href=canvas.toDataURL("image/png");
+  a.click();
+}
+
+async function copyIP(){
+  try{
+    await navigator.clipboard.writeText(HOST);
+    alert("服务器地址已复制："+HOST);
+  }catch(e){
+    alert("服务器地址："+HOST);
+  }
+}
+
+// Initial load
+drawLoading("正在连接服务器...");
+refresh();
+
+// Auto refresh
+setInterval(refresh,REFRESH_INTERVAL);
+</script>
+</body>
+</html>
